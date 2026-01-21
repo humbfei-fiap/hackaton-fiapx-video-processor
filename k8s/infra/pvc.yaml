@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-pvc
+  namespace: fiapx
+spec:
+  accessModes:
+    - ReadWriteMany # Necessário para múltiplos pods (Gateway+Worker) lerem/escreverem
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: efs-sc # Descomentar se estiver usando AWS EFS ou outro driver RWX
