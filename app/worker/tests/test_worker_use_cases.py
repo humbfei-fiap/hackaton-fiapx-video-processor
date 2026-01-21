@@ -24,7 +24,9 @@ def test_process_video_success(tmp_path):
     mock_processor = MagicMock()
     mock_processor.extract_frames_to_zip.return_value = "test.zip"
     
-    use_case = ProcessVideoUseCase(mock_repo, mock_processor, str(uploads_dir), str(outputs_dir))
+    mock_notifier = MagicMock()
+    
+    use_case = ProcessVideoUseCase(mock_repo, mock_processor, mock_notifier, str(uploads_dir), str(outputs_dir))
     
     # Act
     use_case.execute(video_id, filename)
