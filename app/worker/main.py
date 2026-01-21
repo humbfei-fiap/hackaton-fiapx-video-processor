@@ -3,10 +3,11 @@ import json
 import os
 import time
 import sys
-from sqlalchemy.orm import Session
 from database import SessionLocal
 import models
-import video_processor
+from src.adapters.db.repositories import PostgresVideoRepository
+from src.adapters.video.opencv_processor import OpenCVVideoProcessor
+from src.use_cases.process_video import ProcessVideoUseCase
 
 # Configurações
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://user:password@rabbitmq:5672/")
@@ -19,20 +20,6 @@ OUTPUTS_DIR = os.path.join(SHARED_DIR, "outputs")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
 
-def update_video_status(video_id: int, status: models.VideoStatus, zip_path: str = None):
-    db: Session = SessionLocal()
-    try:
-        video = db.query(models.Video).filter(models.Video.id == video_id).first()
-        if video:
-            video.status = status
-            if zip_path:
-                video.zip_path = zip_path
-            db.commit()
-    except Exception as e:
-        print(f"Erro ao atualizar banco de dados: {e}")
-    finally:
-        db.close()
-
 def callback(ch, method, properties, body):
     print(f" [x] Recebido: {body}")
     data = json.loads(body)
@@ -41,41 +28,28 @@ def callback(ch, method, properties, body):
     filename = data.get("filename")
     
     if not video_id or not filename:
-        print("Mensagem inválida.")
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
 
-    video_path = os.path.join(UPLOADS_DIR, filename)
-    
-    if not os.path.exists(video_path):
-        print(f"Erro: Arquivo não encontrado: {video_path}")
-        update_video_status(video_id, models.VideoStatus.ERROR)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        return
-
-    # Atualiza status para PROCESSING
-    update_video_status(video_id, models.VideoStatus.PROCESSING)
-    
+    # Dependency Injection
+    db_session = SessionLocal()
     try:
-        # Processa o vídeo
-        zip_filename = video_processor.process_video_file(video_path, OUTPUTS_DIR)
+        repo = PostgresVideoRepository(db_session)
+        processor = OpenCVVideoProcessor()
+        use_case = ProcessVideoUseCase(repo, processor, UPLOADS_DIR, OUTPUTS_DIR)
         
-        # Atualiza status para COMPLETED
-        update_video_status(video_id, models.VideoStatus.COMPLETED, zip_filename)
+        use_case.execute(video_id, filename)
         print(f" [x] Processamento concluído para vídeo ID {video_id}")
         
     except Exception as e:
-        print(f"Erro no processamento: {e}")
-        update_video_status(video_id, models.VideoStatus.ERROR)
-        
+        print(f"Critical error in worker: {e}")
     finally:
-        # Confirma processamento da mensagem
+        db_session.close()
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
 def main():
-    print("🎬 Video Worker connecting to RabbitMQ...")
+    print("🎬 Video Worker connecting to RabbitMQ (Clean Arch)...")
     
-    # Retry logic connection
     while True:
         try:
             params = pika.URLParameters(RABBITMQ_URL)
@@ -98,7 +72,6 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print('Interrupted')
         try:
             sys.exit(0)
         except SystemExit:

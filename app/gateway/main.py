@@ -2,28 +2,32 @@ from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import os
-import shutil
-import uuid
 from datetime import timedelta
-from typing import List
 
-import models, database, auth, messaging
+# Import layers
+import models, database, auth
 from database import engine, get_db
+from src.domain.entities import User as UserEntity
+from src.adapters.db.repositories import PostgresUserRepository, PostgresVideoRepository
+from src.adapters.messaging.producer import RabbitMQProducer
+from src.adapters.storage import LocalFileStorage
+from src.use_cases.register_user import RegisterUserUseCase
+from src.use_cases.upload_video import UploadVideoUseCase
+from src.use_cases.list_videos import ListVideosUseCase
 from jose import JWTError, jwt
 
-# Cria as tabelas no banco de dados
+# Init DB Tables
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="FIAP X Video Processor Gateway")
+app = FastAPI(title="FIAP X Video Processor Gateway (Clean Arch)")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# Diretório para salvar os vídeos
-UPLOAD_DIR = os.getenv("SHARED_DIR", "/data")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(os.path.join(UPLOAD_DIR, "uploads"), exist_ok=True)
+# Dependency Injection Setup
+SHARED_DIR = os.getenv("SHARED_DIR", "/data")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://user:password@rabbitmq:5672/")
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user_entity(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UserEntity:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -36,27 +40,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    user = db.query(models.User).filter(models.User.username == username).first()
+        
+    repo = PostgresUserRepository(db)
+    user = repo.get_by_username(username)
     if user is None:
         raise credentials_exception
     return user
 
 @app.post("/register")
 def register(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.username == form_data.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    hashed_password = auth.get_password_hash(form_data.password)
-    new_user = models.User(username=form_data.username, hashed_password=hashed_password)
-    db.add(new_user)
-    db.commit()
-    return {"message": "User created successfully"}
+    repo = PostgresUserRepository(db)
+    use_case = RegisterUserUseCase(repo, auth.get_password_hash)
+    try:
+        use_case.execute(form_data.username, form_data.password)
+        return {"message": "User created successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/token")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == form_data.username).first()
-    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+    repo = PostgresUserRepository(db)
+    user = repo.get_by_username(form_data.username)
+    
+    if not user or not auth.verify_password(form_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -71,50 +77,34 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 @app.post("/upload")
 async def upload_video(
     file: UploadFile = File(...), 
-    current_user: models.User = Depends(get_current_user),
+    current_user: UserEntity = Depends(get_current_user_entity),
     db: Session = Depends(get_db)
 ):
-    # Gera um nome único para o arquivo
-    ext = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, "uploads", unique_filename)
+    video_repo = PostgresVideoRepository(db)
+    broker = RabbitMQProducer(RABBITMQ_URL, "video_processing")
+    storage = LocalFileStorage(SHARED_DIR)
     
-    # Salva o arquivo no volume compartilhado
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    use_case = UploadVideoUseCase(video_repo, broker, storage)
     
-    # Registra no banco de dados
-    db_video = models.Video(
-        filename=unique_filename,
-        original_name=file.filename,
-        user_id=current_user.id,
-        status=models.VideoStatus.PENDING
-    )
-    db.add(db_video)
-    db.commit()
-    db.refresh(db_video)
-    
-    # Envia para a fila do RabbitMQ
-    try:
-        messaging.send_to_queue(db_video.id, unique_filename)
-    except Exception as e:
-        # Se falhar a fila, poderíamos marcar como erro, mas vamos simplificar por agora
-        print(f"Erro ao enviar para fila: {e}")
+    video = use_case.execute(file.file, file.filename, current_user)
     
     return {
-        "id": db_video.id,
-        "filename": file.filename,
-        "status": db_video.status.value
+        "id": video.id,
+        "filename": video.original_name,
+        "status": video.status
     }
 
 @app.get("/status")
-def get_status(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    videos = db.query(models.Video).filter(models.Video.user_id == current_user.id).all()
+def get_status(current_user: UserEntity = Depends(get_current_user_entity), db: Session = Depends(get_db)):
+    video_repo = PostgresVideoRepository(db)
+    use_case = ListVideosUseCase(video_repo)
+    videos = use_case.execute(current_user)
+    
     return [
         {
             "id": v.id,
             "original_name": v.original_name,
-            "status": v.status.value,
+            "status": v.status,
             "created_at": v.created_at,
             "zip_url": f"/download/{v.zip_path}" if v.zip_path else None
         } for v in videos
@@ -122,4 +112,4 @@ def get_status(current_user: models.User = Depends(get_current_user), db: Sessio
 
 @app.get("/")
 async def root():
-    return {"message": "FIAP X Video Processor API Gateway is running"}
+    return {"message": "FIAP X Video Processor API Gateway is running with Clean Architecture"}
