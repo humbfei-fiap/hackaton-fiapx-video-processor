@@ -1,0 +1,17 @@
+**/.pyc
+**/.pyo
+**/__pycache__
+.git
+.gitignore
+.dockerignore
+**/venv
+**/env
+**/uploads
+**/outputs
+**/temp
+**/data
+k8s/
+legacy/
+hack_soat11.pdf
+docker-compose.yml
+README.md

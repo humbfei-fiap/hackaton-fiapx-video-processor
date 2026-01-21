@@ -1,0 +1,56 @@
+name: CI - Fiap X Video Processor
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-gateway:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        cd app/gateway
+        pip install -r requirements.txt
+    - name: Run tests
+      run: |
+        cd app/gateway
+        export PYTHONPATH=$PYTHONPATH:.
+        pytest
+
+  test-worker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        cd app/worker
+        # Note: opencv-python-headless is used to avoid GUI dependencies in CI
+        pip install -r requirements.txt
+    - name: Run tests
+      run: |
+        cd app/worker
+        export PYTHONPATH=$PYTHONPATH:.
+        pytest
+
+  build-images:
+    needs: [test-gateway, test-worker]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build Gateway Image
+      run: docker build -t fiapx-gateway:${{ github.sha }} app/gateway/
+    - name: Build Worker Image
+      run: docker build -t fiapx-worker:${{ github.sha }} app/worker/
