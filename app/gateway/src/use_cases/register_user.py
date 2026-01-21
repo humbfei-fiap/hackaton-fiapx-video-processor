@@ -6,10 +6,10 @@ class RegisterUserUseCase:
         self.user_repo = user_repo
         self.hasher = password_hasher
 
-    def execute(self, username: str, password: str) -> User:
+    def execute(self, username: str, email: str, password: str) -> User:
         if self.user_repo.get_by_username(username):
             raise ValueError("Username already exists")
         
         hashed = self.hasher(password)
-        new_user = User(username=username, password=hashed)
+        new_user = User(username=username, email=email, password=hashed)
         return self.user_repo.create(new_user)

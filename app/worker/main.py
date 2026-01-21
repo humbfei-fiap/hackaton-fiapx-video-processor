@@ -7,6 +7,8 @@ from database import SessionLocal
 import models
 from src.adapters.db.repositories import PostgresVideoRepository
 from src.adapters.video.opencv_processor import OpenCVVideoProcessor
+from src.adapters.notification.log_service import LogNotificationService
+from src.adapters.notification.ses_service import SESNotificationService
 from src.use_cases.process_video import ProcessVideoUseCase
 
 # Configurações
@@ -15,6 +17,7 @@ QUEUE_NAME = "video_processing"
 SHARED_DIR = os.getenv("SHARED_DIR", "/data")
 UPLOADS_DIR = os.path.join(SHARED_DIR, "uploads")
 OUTPUTS_DIR = os.path.join(SHARED_DIR, "outputs")
+NOTIFICATION_METHOD = os.getenv("NOTIFICATION_METHOD", "LOG") # LOG ou SES
 
 # Garantir que diretórios existam
 os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -36,7 +39,13 @@ def callback(ch, method, properties, body):
     try:
         repo = PostgresVideoRepository(db_session)
         processor = OpenCVVideoProcessor()
-        use_case = ProcessVideoUseCase(repo, processor, UPLOADS_DIR, OUTPUTS_DIR)
+        
+        if NOTIFICATION_METHOD == "SES":
+            notifier = SESNotificationService()
+        else:
+            notifier = LogNotificationService()
+            
+        use_case = ProcessVideoUseCase(repo, processor, notifier, UPLOADS_DIR, OUTPUTS_DIR)
         
         use_case.execute(video_id, filename)
         print(f" [x] Processamento concluído para vídeo ID {video_id}")

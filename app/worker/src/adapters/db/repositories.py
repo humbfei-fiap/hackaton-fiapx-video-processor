@@ -24,3 +24,9 @@ class PostgresVideoRepository(VideoRepository):
             db_video.status = models.VideoStatus(video.status.value)
             db_video.zip_path = video.zip_path
             self.db.commit()
+
+    def get_user_email_by_video(self, video_id: int) -> str:
+        db_video = self.db.query(models.Video).filter(models.Video.id == video_id).first()
+        if db_video and db_video.owner:
+            return db_video.owner.email
+        return None

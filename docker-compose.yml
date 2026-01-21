@@ -33,6 +33,17 @@ services:
       timeout: 10s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: fiapx-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   gateway:
     build: ./app/gateway
     container_name: fiapx-gateway
@@ -44,11 +55,14 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:password@postgres:5432/fiapx_db
       - RABBITMQ_URL=amqp://user:password@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379/0
       - SHARED_DIR=/data
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   worker:

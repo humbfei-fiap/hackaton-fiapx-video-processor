@@ -32,4 +32,5 @@ data:
   # Connection Strings montadas
   DATABASE_URL: cG9zdGdyZXNxbDovL3VzZXI6cGFzc3dvcmRAcG9zdGdyZXMtc2VydmljZTo1NDMyL2ZpYXB4X2Ri
   RABBITMQ_URL: YW1xcDovL3VzZXI6cGFzc3dvcmRAcmFiYml0bXEtc2VydmljZTo1NjcyLw==
+  REDIS_URL: cmVkaXM6Ly9yZWRpcy1zZXJ2aWNlOjYzNzkvMA==
   SECRET_KEY: c3VwZXJfc2VjcmV0X2tleQ==

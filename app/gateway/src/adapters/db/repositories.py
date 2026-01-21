@@ -8,16 +8,16 @@ class PostgresUserRepository(UserRepository):
         self.db = db
 
     def create(self, user: UserEntity) -> UserEntity:
-        db_user = models.User(username=user.username, hashed_password=user.password)
+        db_user = models.User(username=user.username, email=user.email, hashed_password=user.password)
         self.db.add(db_user)
         self.db.commit()
         self.db.refresh(db_user)
-        return UserEntity(id=db_user.id, username=db_user.username, password=db_user.hashed_password)
+        return UserEntity(id=db_user.id, username=db_user.username, email=db_user.email, password=db_user.hashed_password)
 
     def get_by_username(self, username: str) -> UserEntity:
         db_user = self.db.query(models.User).filter(models.User.username == username).first()
         if db_user:
-            return UserEntity(id=db_user.id, username=db_user.username, password=db_user.hashed_password)
+            return UserEntity(id=db_user.id, username=db_user.username, email=db_user.email, password=db_user.hashed_password)
         return None
 
 class PostgresVideoRepository(VideoRepository):

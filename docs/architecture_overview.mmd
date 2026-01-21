@@ -1,0 +1,61 @@
+graph TD
+    %% Atores e Clientes
+    User((Usuário))
+    
+    %% Fronteiras do Sistema
+    subgraph "Cluster Kubernetes (AWS EKS)"
+        
+        subgraph "Ingress & Network"
+            Ingress[Ingress Controller/ALB]
+        end
+
+        subgraph "API Gateway (BFF)"
+            Gateway[FastAPI Gateway]
+            Auth[Auth Service<br/>(JWT)]
+        end
+        
+        subgraph "Persistência"
+            DB[(PostgreSQL)]
+            Redis[(Redis Cache)]
+            Storage{Shared Volume<br/>(EFS/PVC)}
+        end
+        
+        subgraph "Mensageria"
+            Queue[[RabbitMQ]]
+        end
+        
+        subgraph "Processamento (Worker)"
+            Worker[Video Worker<br/>(Python + OpenCV)]
+        end
+    end
+    
+    subgraph "Serviços Externos"
+        SES[AWS SES<br/>(Email Service)]
+    end
+
+    %% Relacionamentos
+    User -->|HTTPS| Ingress
+    Ingress -->|Route| Gateway
+    
+    Gateway -->|Auth Check| Auth
+    Gateway -->|Read/Write| DB
+    Gateway -->|Cache Hit/Miss| Redis
+    Gateway -->|Salva Arquivo| Storage
+    Gateway -->|Publish Event| Queue
+    
+    Queue -->|Consume Event| Worker
+    Worker -->|Lê Arquivo| Storage
+    Worker -->|Update Status| DB
+    Worker -->|Notifica Erro| SES
+    Worker -->|Salva ZIP| Storage
+
+    %% Estilização
+    classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef db fill:#336791,stroke:#232F3E,stroke-width:2px,color:white;
+    classDef python fill:#3776AB,stroke:#FFD43B,stroke-width:2px,color:white;
+    classDef queue fill:#FF6600,stroke:#232F3E,stroke-width:2px,color:white;
+    
+    class SES aws;
+    class DB,Redis,Storage db;
+    class Gateway,Worker python;
+    class Queue queue;

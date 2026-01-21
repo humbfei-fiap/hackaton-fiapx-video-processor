@@ -1,0 +1,53 @@
+sequenceDiagram
+    autonumber
+    actor U as Usuário
+    participant G as Gateway (FastAPI)
+    participant D as Banco (PostgreSQL)
+    participant S as Storage (Volume)
+    participant Q as RabbitMQ
+    participant W as Worker
+    participant R as Redis
+    participant M as AWS SES (Email)
+
+    Note over U, G: 1. Fluxo de Upload
+    U->>G: POST /upload (video.mp4) + Token
+    G->>G: Valida JWT
+    G->>S: Salva video.mp4
+    G->>D: INSERT Video (Status=PENDING)
+    G->>Q: Publica Mensagem {video_id, path}
+    G-->>U: Retorna 200 OK (video_id)
+
+    Note over Q, W: 2. Processamento Assíncrono
+    Q->>W: Consome Mensagem
+    W->>D: UPDATE Status=PROCESSING
+    W->>S: Lê video.mp4
+    loop Para cada segundo
+        W->>W: OpenCV Extrai Frame
+    end
+    W->>W: Gera Arquivo .ZIP
+    W->>S: Salva video.zip
+    
+    alt Sucesso
+        W->>D: UPDATE Status=COMPLETED (zip_path)
+    else Erro
+        W->>D: UPDATE Status=ERROR
+        W->>M: Envia Email de Notificação
+    end
+
+    Note over U, R: 3. Consulta de Status
+    U->>G: GET /status
+    G->>R: GET user_videos:{id}
+    alt Cache Miss
+        R-->>G: null
+        G->>D: SELECT * FROM Videos WHERE user_id
+        D-->>G: Lista de Vídeos
+        G->>R: SETEX user_videos:{id} (10s)
+    else Cache Hit
+        R-->>G: JSON Cacheado
+    end
+    G-->>U: Lista JSON (Status + Link Download)
+
+    Note over U, G: 4. Download
+    U->>G: GET /download/{zip_name}
+    G->>S: Lê video.zip
+    G-->>U: Arquivo Binário (Download)

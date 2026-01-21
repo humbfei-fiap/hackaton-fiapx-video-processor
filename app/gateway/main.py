@@ -1,8 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import os
 from datetime import timedelta
+from typing import List
 
 # Import layers
 import models, database, auth
@@ -27,6 +29,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 SHARED_DIR = os.getenv("SHARED_DIR", "/data")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://user:password@rabbitmq:5672/")
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
 def get_current_user_entity(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UserEntity:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -48,12 +54,12 @@ def get_current_user_entity(token: str = Depends(oauth2_scheme), db: Session = D
     return user
 
 @app.post("/register")
-def register(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def register(user_data: UserCreate, db: Session = Depends(get_db)):
     repo = PostgresUserRepository(db)
     use_case = RegisterUserUseCase(repo, auth.get_password_hash)
     try:
-        use_case.execute(form_data.username, form_data.password)
-        return {"message": "User created successfully"}
+        use_case.execute(user_data.username, user_data.password)
+        return {"message": "User {user_data.username} criado com sucesso!"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -65,7 +71,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user or not auth.verify_password(form_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Usuario ou senha incorretos. Verifique seu username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)

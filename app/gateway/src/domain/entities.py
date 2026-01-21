@@ -13,6 +13,7 @@ class VideoStatus(str, Enum):
 class User:
     username: str
     password: str # Hashed
+    email: str
     id: Optional[int] = None
 
 @dataclass
