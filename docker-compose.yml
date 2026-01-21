@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: fiapx-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: fiapx_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d fiapx_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: fiapx-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  gateway:
+    build: ./app/gateway
+    container_name: fiapx-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app/gateway:/app
+      - shared_data:/data
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/fiapx_db
+      - RABBITMQ_URL=amqp://user:password@rabbitmq:5672/
+      - SHARED_DIR=/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    build: ./app/worker
+    container_name: fiapx-worker
+    volumes:
+      - ./app/worker:/app
+      - shared_data:/data
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/fiapx_db
+      - RABBITMQ_URL=amqp://user:password@rabbitmq:5672/
+      - SHARED_DIR=/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  shared_data:
